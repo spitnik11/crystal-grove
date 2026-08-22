@@ -16,9 +16,12 @@ var invulnerable := 0.0
 var finished := false
 var status_label: Label
 var gate_label: Label
+var result_panel: ColorRect
+var result_label: Label
 
 
 func _ready() -> void:
+	_ensure_input_actions()
 	_run_self_check()
 	RenderingServer.set_default_clear_color(Color("10201c"))
 	_build_ground()
@@ -48,6 +51,10 @@ func _run_self_check() -> void:
 
 
 func _run_mvp_test() -> void:
+	for action in ["move_left", "move_right", "move_up", "move_down"]:
+		assert(InputMap.has_action(action) and not InputMap.action_get_events(action).is_empty())
+	for animation in ["front", "back", "left", "right"]:
+		assert(player_sprite.sprite_frames.has_animation(animation))
 	for position in CRYSTAL_POSITIONS:
 		player.position = position
 		_collect_crystals()
@@ -96,7 +103,7 @@ func _build_world() -> void:
 		crystals.append(crystal)
 	for route in SLIME_ROUTES:
 		var slime := AnimatedSprite2D.new()
-		slime.sprite_frames = _sheet_frames("res://third_party/slime_walk.png", 8, 4)
+		slime.sprite_frames = _sheet_frames("res://third_party/slime_walk.png", 8, ["front", "back", "left", "right"])
 		slime.animation = "front"
 		slime.play()
 		slime.position = route[0]
@@ -109,7 +116,7 @@ func _build_player() -> void:
 	player = CharacterBody2D.new()
 	player.position = Vector2(320, 405)
 	player_sprite = AnimatedSprite2D.new()
-	player_sprite.sprite_frames = _sheet_frames("res://third_party/swordsman_walk.png", 6, 4)
+	player_sprite.sprite_frames = _sheet_frames("res://third_party/swordsman_walk.png", 6, ["left", "right", "front", "back"])
 	player_sprite.animation = "front"
 	player_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	player.add_child(player_sprite)
@@ -130,11 +137,32 @@ func _build_hud() -> void:
 	canvas.add_child(status_label)
 	gate_label = _label("Gate sealed", Vector2(498, 22), 16, Color("e69b7b"))
 	canvas.add_child(gate_label)
+	var help_panel := ColorRect.new()
+	help_panel.color = Color("c91c2625")
+	help_panel.position = Vector2(138, 444)
+	help_panel.size = Vector2(364, 28)
+	canvas.add_child(help_panel)
+	canvas.add_child(_label("ARROWS / WASD MOVE  •  COLLECT 5  •  AVOID SLIMES", Vector2(142, 449), 13, Color("f3d58a")))
+	result_panel = ColorRect.new()
+	result_panel.color = Color("ed1c2625")
+	result_panel.position = Vector2(145, 185)
+	result_panel.size = Vector2(350, 110)
+	result_panel.visible = false
+	canvas.add_child(result_panel)
+	result_label = _label("", Vector2(18, 20), 20, Color("f3d58a"))
+	result_label.size = Vector2(314, 76)
+	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	result_panel.add_child(result_label)
 	_update_hud()
 
 
 func _update_player() -> void:
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+	var wasd := Input.get_vector("move_left", "move_right", "move_up", "move_down")
+	if wasd != Vector2.ZERO:
+		input = wasd
 	player.velocity = input * SPEED
 	if input != Vector2.ZERO:
 		var old_position := player.position
@@ -158,6 +186,8 @@ func _set_direction(direction: Vector2) -> void:
 
 
 func _blocked(position: Vector2) -> bool:
+	if position.y < 135.0 and absf(position.x - 320.0) < 75.0:
+		return collected < 5 or absf(position.x - 320.0) > 32.0
 	for rock in ROCK_POSITIONS:
 		if position.distance_to(rock) < 30.0:
 			return true
@@ -176,9 +206,11 @@ func _update_slimes(delta: float) -> void:
 			hearts -= 1
 			invulnerable = 1.2
 			player.position = Vector2(320, 405)
+			player_sprite.modulate = Color("ff8a7a")
+			create_tween().tween_property(player_sprite, "modulate", Color.WHITE, 0.35)
 			_update_hud()
 			if hearts <= 0:
-				_finish("The grove overwhelmed you. Press Enter to retry.", false)
+				_finish("The grove overwhelmed you.", false)
 
 
 func _collect_crystals() -> void:
@@ -192,14 +224,14 @@ func _collect_crystals() -> void:
 
 func _check_gate() -> void:
 	if collected == 5 and player.position.y < 120.0 and absf(player.position.x - 320.0) < 50.0:
-		_finish("The grove is restored. Press Enter to play again.", true)
+		_finish("The grove is restored.", true)
 
 
 func _finish(message: String, won: bool) -> void:
 	finished = true
-	status_label.text = message
-	status_label.position.x = 150
-	status_label.add_theme_color_override("font_color", Color("9ff2c9") if won else Color("f29b8f"))
+	result_panel.visible = true
+	result_label.text = "%s\nPress ENTER to play again" % message
+	result_label.add_theme_color_override("font_color", Color("9ff2c9") if won else Color("f29b8f"))
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -213,6 +245,16 @@ func _update_hud() -> void:
 	gate_label.add_theme_color_override("font_color", Color("8fe0b0") if collected == 5 else Color("e69b7b"))
 
 
+func _ensure_input_actions() -> void:
+	var bindings := {"move_left": KEY_A, "move_right": KEY_D, "move_up": KEY_W, "move_down": KEY_S}
+	for action in bindings:
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
+			var event := InputEventKey.new()
+			event.physical_keycode = bindings[action]
+			InputMap.action_add_event(action, event)
+
+
 func _add_prop(parent: Node, file_name: String, position_value: Vector2, scale_value: float) -> Sprite2D:
 	var sprite := Sprite2D.new()
 	sprite.texture = load("res://third_party/%s" % file_name)
@@ -223,20 +265,20 @@ func _add_prop(parent: Node, file_name: String, position_value: Vector2, scale_v
 	return sprite
 
 
-func _sheet_frames(path: String, columns: int, rows: int) -> SpriteFrames:
+func _sheet_frames(path: String, columns: int, row_names: Array) -> SpriteFrames:
 	var texture: Texture2D = load(path)
 	var frames := SpriteFrames.new()
 	frames.remove_animation("default")
-	var names := ["front", "left", "right", "back"]
-	for row in rows:
-		frames.add_animation(names[row])
-		frames.set_animation_speed(names[row], 8.0)
-		frames.set_animation_loop(names[row], true)
+	for row in row_names.size():
+		var animation_name: String = row_names[row]
+		frames.add_animation(animation_name)
+		frames.set_animation_speed(animation_name, 8.0)
+		frames.set_animation_loop(animation_name, true)
 		for column in columns:
 			var atlas := AtlasTexture.new()
 			atlas.atlas = texture
 			atlas.region = Rect2(column * 64, row * 64, 64, 64)
-			frames.add_frame(names[row], atlas)
+			frames.add_frame(animation_name, atlas)
 	return frames
 
 
