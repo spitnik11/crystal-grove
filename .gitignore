@@ -1,0 +1,5 @@
+.godot/
+third_party/**
+!third_party/.gitkeep
+captures/
+
